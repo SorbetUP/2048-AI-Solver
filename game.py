@@ -1,3 +1,4 @@
+# game.py
 from board import Board
 
 class Game:
@@ -5,33 +6,21 @@ class Game:
 
     def __init__(self):
         self.board = Board()
-        self.over = False
-        self.won = False
         self.score = 0
+        self.over  = False
+        self.won   = False
 
-    def move(self, direction):
-        if direction == 'left':
-            moved, gained = self.board.move_left()
-        elif direction == 'right':
-            moved, gained = self.board.move_right()
-        elif direction == 'up':
-            moved, gained = self.board.move_up()
-        elif direction == 'down':
-            moved, gained = self.board.move_down()
-        else:
-            return False, 0
-
+    def move(self, dir_str: str) -> tuple[bool, int]:
+        moved, gained = self.board.move(dir_str)
         if moved:
             self.score += gained
             if self.board.max_tile() >= self.WIN_TILE:
-                self.won = True
+                self.won  = True
                 self.over = True
             elif not self.board.can_move():
                 self.over = True
         return moved, gained
 
-    def is_over(self):
-        return self.over
-
-    def is_won(self):
-        return self.won
+    # raccourcis
+    def is_over(self) -> bool: return self.over
+    def is_won (self) -> bool: return self.won
