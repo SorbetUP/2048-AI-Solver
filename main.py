@@ -1,45 +1,53 @@
+# main.py – interface interactive + benchmark aléatoire haute-perf
+import argparse, time
 from game import Game
-import os
+from random_play import random_benchmark        # <-- nouvelle import
 
-def clear():
-    os.system('cls' if os.name == 'nt' else 'clear')
+# ─────────────────────────────────────────────
+def _clear_screen():
+    import os, sys
+    if sys.stdout.isatty():
+        os.system("cls" if os.name == "nt" else "clear")
 
-def print_board(board, score):
-    clear()
-    print("-" * 25)
-    for row in board.grid:
-        print("|", end="")
-        for val in row:
-            if val == 0:
-                print("    .", end=" ")
-            else:
-                print(f"{val:5}", end=" ")
-        print("|")
-    print("-" * 25)
-    print(f"Score : {score}")
-    print("Utilisez z (up), s (down), q (left), d (right) pour jouer. 'x' pour quitter.")
+def _print_board(g: Game):
+    _clear_screen()
+    print(g.board)
+    print(f"Score : {g.score}")
 
-def main():
-    game = Game()
-    while not game.is_over():
-        print_board(game.board, game.score)
-        move = input("Direction (z/s/q/d): ").lower()
-        if move == 'x':
-            print("Partie terminée.")
+# ─────────────────────────────────────────────
+def interactive():
+    g = Game()
+    mapping = {"z": "up", "s": "down", "q": "left", "d": "right"}
+    while not g.is_over():
+        _print_board(g)
+        mv = input("Direction (z/q/s/d) ou x pour quitter : ").lower()
+        if mv == "x":
             break
-        mapping = {'z': 'up', 's': 'down', 'q': 'left', 'd': 'right'}
-        if move not in mapping:
-            print("Commande invalide.")
+        if mv not in mapping:
             continue
-        moved, gained = game.move(mapping[move])
-        if not moved:
-            print("Déplacement impossible, essaie autre chose.")
-    else:
-        print_board(game.board, game.score)
-        if game.is_won():
-            print("Bravo, tu as gagné !")
-        else:
-            print("Game over.")
+        g.move(mapping[mv])
+    _print_board(g)
+    print("Gagné !" if g.is_won() else "Perdu…")
 
+# ─────────────────────────────────────────────
+def bench(n_games: int):
+    print(f"Lancement benchmark aléatoire : {n_games:_} parties…")
+    t0     = time.perf_counter()
+    scores = random_benchmark(n_games)          # <-- appel au moteur JIT
+    dt     = time.perf_counter() - t0
+    rate   = n_games / dt
+    print(f"{rate:,.0f} parties/s – durée {dt:.3f}s")
+    print(f"Score moyen      : {scores.mean():.1f}")
+    print(f"Score médian     : {float(__import__('numpy').median(scores)):.1f}")
+    print(f"Max / Min scores : {scores.max()} / {scores.min()}")
+
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    p = argparse.ArgumentParser()
+    p.add_argument("--bench", type=int, help="Nombre de parties à simuler pour le benchmark aléatoire")
+    args = p.parse_args()
+
+    if args.bench:
+        bench(args.bench)
+    else:
+        interactive()
