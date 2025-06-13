@@ -140,7 +140,7 @@ class Pygame2048UI:
                     pygame.quit(); raise SystemExit
 
     def run(self):
-        """Boucle principale bloquante ; gère clavier & souris.``ai_move`` reste utilisable."""
+        """Boucle principale bloquante ; gère clavier & souris.``ai_move`` reste utilisable."""
         self.running=True
         while self.running:
             self.tick()
