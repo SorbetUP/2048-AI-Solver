@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import pygame
 from typing import Literal
 from game import Game
@@ -15,7 +16,7 @@ class Pygame2048UI:
         4096:(60,  58,  50)
     }
 
-    def __init__(self, tile_size: int = 120, margin: int = 20):
+    def __init__(self, tile_size: int = 120, margin: int = 20,max_fps :int = 30):
         # géométrie -----------------------------------------------------------
         self.TAILLE  = tile_size
         self.MARGE   = margin
@@ -40,6 +41,9 @@ class Pygame2048UI:
         self.show_popup: bool = False
         self.buttons:    dict[str, pygame.Rect] = {}
         self.running:    bool = False
+
+        # fps ----------------------------------------------------------------
+        self.max_fps = max_fps
 
         # rendu initial -------------------------------------------------------
         self._render()
@@ -121,8 +125,8 @@ class Pygame2048UI:
             self._render()
         return moved
 
-    def tick(self, max_fps: int = 30):
-        self.clock.tick(max_fps)
+    def tick(self):
+        self.clock.tick(self.max_fps)
         for e in pygame.event.get():
             if e.type==pygame.QUIT:
                 pygame.quit(); raise SystemExit
@@ -146,5 +150,11 @@ class Pygame2048UI:
             self.tick()
 
 if __name__ == "__main__":
-    ui = Pygame2048UI()
+    p = argparse.ArgumentParser()
+    p.add_argument("--fps", type=int, help="Nombre d'image par seconde")
+    args = p.parse_args()
+    if args.fps:
+        ui = Pygame2048UI(max_fps = args.fps)
+    else :
+        ui = Pygame2048UI()
     ui.run()
