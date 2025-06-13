@@ -3,7 +3,10 @@ from board import Board
 from search.expectimax import best_move
 
 class DummyVictor:
-    """Évaluation personnalisée simple : favorise les grilles avec + de cases vides"""
+    """
+    Évaluation simple imitant une IA : plus il y a de cases vides, mieux c'est.
+    Sert à tester l'intégration de fonctions personnalisées (ex : Victor).
+    """
     def __call__(self, board: Board) -> float:
         raw = board.raw
         return sum(((raw >> (i * 4)) & 0xF) == 0 for i in range(16))
@@ -12,10 +15,14 @@ class DummyVictor:
 class TestExpectimax(unittest.TestCase):
 
     def test_deterministic_board_best_move(self):
+        """
+        Grille simple avec deux tuiles fusionnables à gauche.
+        On s'attend à ce que l'algorithme choisisse 'left'.
+        """
         board = Board()
         board._b = 0  # grille vide
 
-        # Set une grille simple à la main : deux tuiles "2" à fusionner à gauche
+        # Place manuellement des tuiles 2 côte à côte
         tiles = [1, 1, 0, 0,
                  0, 0, 0, 0,
                  0, 0, 0, 0,
@@ -29,8 +36,12 @@ class TestExpectimax(unittest.TestCase):
         self.assertEqual(move, "left", f"Expected 'left' but got {move}")
 
     def test_eval_fn_victor_like(self):
+        """
+        Teste l'intégration avec une fonction d'évaluation personnalisée.
+        Vérifie que l’algorithme retourne bien un coup valide.
+        """
         board = Board()
-        board._b = 0  # grille vide avec quelques tuiles
+        board._b = 0
         tiles = [1, 2, 0, 0,
                  0, 0, 0, 0,
                  0, 3, 0, 0,
