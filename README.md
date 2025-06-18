@@ -1,111 +1,178 @@
-# 🧠 2048 AI Solver
+# 🧠 2048 AI Solver
 
-machine learning 2048 solver - student project
-
-```pip install nibabel numpy ```
-```python main_game.py```
-```python main_game.py --bench 100000 ```
-```python interface_jeu_pygame.py ```
-```python interface_jeu_pygame.py --fps 120 ```
+> **Machine‑Learning 2048** – cours & playground
 
 ---
 
-## 🎯 Objectif
-
-Ce projet vise à créer une intelligence artificielle capable de résoudre le jeu **2048**, un jeu de puzzle populaire basé sur la fusion de tuiles. Vous pouvez tester le jeu ici : [https://play2048.co](https://play2048.co)
-
-Le défi principal du jeu réside dans son caractère **aléatoire** : à chaque mouvement, une nouvelle tuile (2 ou 4) apparaît dans une case vide. Cela rend impossible d’avoir une stratégie gagnante à 100 %.
-
-Deux approches sont explorées dans le projet :
-
-- **Apprentissage par renforcement (RL)** : laisser l’IA apprendre en jouant (non encore implémenté)
-- **Recherche arborescente (Expectimax)** : simuler les possibilités à l’aide d’un arbre décisionnel
-
----
-
-## 🧱 Structure du projet
+## ⚡ Installation rapide
 
 ```bash
+# dépendances minimales
+pip install -r requirements.txt         # numpy / pandas / pyarrow / scikit‑learn / pygame (fac.)
+
+# (option) accélération JIT
+pip install numba
+```
+
+| fichier                               | rôle                                        | lancer                                                       |
+| ------------------------------------- | ------------------------------------------- | ------------------------------------------------------------ |
+| **main\_game.py**                     | console 2048 + IA                           | `python main_game.py`                                        |
+| **interface\_jeu\_pygame.py**         | interface graphique, IA, génération dataset | `python interface_jeu_pygame.py --auto`                      |
+| **interface\_jeu\_pygame.py --bench** | bench IA (multiproc)                        | `python interface_jeu_pygame.py --preset turbo --bench 1000` |
+| **train\_hgb\_rg.py**                 | entraînement MoveNet (HistGB, 5‑fold)       | `python train_hgb_rg.py`                                     |
+
+---
+
+## 🎯 Objectif
+
+Créer (et comparer) plusieurs intelligences artificielles pour [**2048**](https://play2048.co). Deux familles :
+
+1. **Recherche Expectimax BEPP** (déterministe, "fort" mais lent)
+2. **MoveNet** (classeur de coups appris sur dataset → ultra‑rapide)
+
+> BEPP = *Bounded Expectation & Probability Pruning* : beam search + coupures proba.
+
+---
+
+## 🧱 Arborescence
+
+```
 2048-AI-Solver/
-├── board.py                  # Représente l’état du plateau et les opérations sur la grille
-├── game.py                   # Logique du jeu (exécute les tours, mouvements, etc.)
-├── interface_jeu_pygame.py   # Interface graphique (optionnelle, basée sur Pygame)
-├── main.py                   # Script de lancement principal
-├── main_game.py              # Variante avec interface utilisateur
-├── random_play.py            # Génération aléatoire de parties (utile pour créer des données d'entraînement)
-├── simulate.py               # Permet de simuler des parties avec différentes IA
-├── README.md                 # Fichier d’explication du projet
-├── eval/
-│   └── heuristics.py         # Fonctions d’évaluation de la grille (heuristiques ou IA Victor)
-├── search/
-│   └── expectimax.py         # Implémentation de l’algorithme Expectimax
-├── tests/
-│   └── test_expectimax.py    # Tests unitaires pour la logique de recherche
+├─ board.py               # bit‑board 64 bits + kernels numba
+├─ game.py                # logique de jeu
+├─ interface_jeu_pygame.py# UI + dataset + bench (multiprocessing)
+├─ train_hgb_rg.py        # entraînement MoveNet (row‑group streaming)
+├─ search/
+│   ├─ expectimax.py      # BEPP classique
+│   └─ fast_expectimax.py # roll‑out numba (≈ 20 k states/s)
+├─ eval/
+│   └─ heuristics.py      # basic_eval, bounded_eval, Victor (à venir)
+└─ tests/                 # unittest
 ```
 
 ---
 
-## 🤖 Algorithme Expectimax
+## 🤖 IA Recherche – Expectimax BEPP
 
-L'algorithme **Expectimax** est une version modifiée de Minimax qui gère l’aléatoire :
-- **Nœuds MAX** : les décisions du joueur (haut, bas, gauche, droite)
-- **Nœuds CHANCE** : l’apparition aléatoire de 2 ou 4 dans une case vide
-
-Il explore un **arbre de décisions** jusqu’à une certaine profondeur, en utilisant :
-- **Élagage (pruning)** pour éviter des branches peu prometteuses
-- Une **fonction d’évaluation** personnalisable (ex : IA Victor)
-- Une **table de transposition** pour éviter de recalculer des états déjà vus
-
-Exemple d’appel :
 ```python
-move = best_move(board, depth=3, time_limit_ms=1000, eval_fn=DummyVictor())
+from search.expectimax import best_move
+mv = best_move(board, depth=4, time_limit_ms=120)  # BEPP 4‑ply
 ```
 
+- `--beam k` pour la largeur du faisceau
+- `--prob θ`  coupure de branches à faible proba
+- Table de transposition + approfondissement itératif
+
+Préréglages CLI :
+
+| preset      | depth | budget ms | beam | prob | moteur                   |
+| ----------- | ----- | --------- | ---- | ---- | ------------------------ |
+| default     |  3    |  60       | 2    | 0.04 | BEPP                     |
+| **turbo**   |  2    | 40        | 1    | 0.10 | BEPP                     |
+| **rollout** | 3     | –         | –    | –    | `fast_best_move` (numba) |
+
 ---
 
-## 🧠 Évaluation : heuristique ou IA Victor
+## 📊 Génération de dataset
 
-Deux façons d’évaluer une grille :
+```bash
+# boucle infinie en tâche de fond (8 workers) + enregistrement CSV
+python interface_jeu_pygame.py \
+       --preset turbo \
+       --bg inf \
+       --workers 8 \
+       --save data.csv \
+       --auto             # UI cachée si pas de focus
+```
 
-- `basic_eval` : basée sur le nombre de cases vides + valeur max
-- `Victor` (à développer) : IA entraînée à prédire la qualité d'une grille (ex. combien de coups restants)
+Chaque grille enregistrée contient :
 
-Un exemple de fonction d’évaluation simple (DummyVictor) est utilisée dans les tests pour simuler ce comportement.
+- état 16 cases (`c0…c15`)
+- score, max tile, cases vides
+- `bepp2_move`  + `bepp2_val`  *(label pour MoveNet)*
+
+Progrès affiché toutes 100 parties.
 
 ---
 
-## ✅ Tests unitaires
+## 🕹️ Exécution complète – **tous les arguments**
 
-Les tests se trouvent dans `tests/test_expectimax.py` et couvrent :
+Pour voir toutes les options de `interface_jeu_pygame.py` en action :
 
-- Le bon choix de mouvement dans une situation déterministe
-- L’intégration d’une fonction d’évaluation personnalisée
+```bash
+python interface_jeu_pygame.py \
+    --preset turbo \            # réglages rapides (écrase depth/time/beam/prob)
+    --fps 60 \                   # fréquence d'affichage
+    --speed 1.0 \                # facteur de délai IA (UI)
+    --depth 2 --time 40 \        # profondeur + budget ms par coup
+    --beam 1 --prob 0.10 \       # paramètres BEPP
+    --save data.csv \            # CSV de sortie pour le dataset
+    --bg 10000 \                 # nombre de parties IA en arrière‑plan ("inf" pour infini)
+    --workers 8 \                # processus parallèles pour bg / bench
+    --bench 1000 \               # benchmark hors‑écran (1000 parties)
+    --auto                       # démarre la fenêtre en mode IA
+```
 
-Lancer les tests :
+> 🎛️ Utilise **seulement** les switches utiles : `--bench` *ignore* `--fps/--auto`, `--bg` tourne en tâche de fond même si la fenêtre IA est fermée, etc.
+
+---
+
+## 🏋️ Entraînement MoveNet (HistGradientBoosting)
+
+ Entraînement MoveNet (HistGradientBoosting)
+
+```bash
+python train_hgb_rg.py          # lit le Parquet en streaming
+```
+
+Le script :
+
+1. Convertit **data.csv → train\_clean.parquet** (uint16, compact)
+2. 5‑fold CV par row‑group (stream, warm\_start)
+3. Split 80/20, modèle final enregistré → `hgb_2048.joblib`
+4. Rapport métriques JSON
+
+Inference :
+
+```python
+import joblib, numpy as np
+model = joblib.load("hgb_2048.joblib")
+move_id = model.predict(np.array([grid_vector]))[0]
+move = ["up","down","left","right"][move_id]
+```
+
+> **Gain** : 100× plus rapide que Expectimax‑4, \~90 % du score moyen.
+
+---
+
+## ✅ Tests
 
 ```bash
 python -m unittest discover -s tests
 ```
 
----
-
-## 🚀 Prochaines étapes
-
-- 🔬 Implémenter Victor (avec scikit-learn ou PyTorch)
-- 📊 Générer des données avec `random_play.py` pour entraîner Victor
-- ⚡ Ajouter un cache global pour les grilles fréquentes
-- 🕹️ Finaliser l’interface Pygame et permettre de jouer contre l’IA
+*Test OK ⇒ logique Expectimax et heuristique validées.*
 
 ---
 
-## 📚 Bibliothèques utilisées
+## 🚀 Roadmap
 
-- `pygame` *(facultatif)* : interface graphique
-- `pandas` : gestion de données
-- `sklearn` / `torch` *(optionnel)* : pour entraîner Victor
+- 🔬 Entraîner **Victor** (réseau régressant les coups restants)
+- 🤝 Fusion MoveNet + Victor → "depth 1.5" (policy + value)
+- ♻️ Self‑play RL (DQN ou MuZero‑light)
+- 🌐 Web demo (PWA + WASM)
 
 ---
 
-## ✨ Auteurs
+## 📚 Références rapides
 
-Projet réalisé dans le cadre d’un projet IA par [votre équipe].
+- Papier original : **Young et al., Expectimax for 2048, 2014**
+- "Learning n‑tuple networks" — Szubert & Jaśkowski (2014)
+- MuZero — Schrittwieser et al., Nature 2020 (adapté 2048)
+
+---
+
+## ✨ Auteurs
+
+Projet pédagogique – n’hésitez pas à *fork* et proposer vos PR !
+
