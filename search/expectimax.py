@@ -1,104 +1,139 @@
-import time
-import random
-from typing import Callable, Optional
-from board import Board
-from eval.heuristics import basic_eval  # Heuristique par défaut si aucune n'est fournie
+# search/expectimax.py
+"""
+Expectimax + B.E.P.P. (Bounded Expectation & Probability Pruning)
 
-# Liste des directions possibles (les coups dans 2048)
+Nouveautés :
+• set_bepp_params(prob_cutoff, beam_k) ⇒ modifie les bornes à chaud
+"""
+
+import time, random
+from typing import Callable, Optional, Dict, Tuple, List
+
+from board import Board
+from eval.heuristics import bounded_eval
+
+# ─────────────────────── paramètres B.E.P.P. (modifiables) ─────────────────
+PROB_CUTOFF = 0.02   # θ : probabilité minimale développée à un nœud chance
+BEAM_K      = 4      # nombre max de directions MAX gardées après tri
+V_MIN, V_MAX = 0.0, 1.0   # domaine de bounded_eval (toujours 0-1)
+
+def set_bepp_params(*, prob_cutoff: float | None = None,
+                    beam_k: int | None = None) -> None:
+    """Permet de changer θ et/ou k depuis un autre module (argparse)."""
+    global PROB_CUTOFF, BEAM_K
+    if prob_cutoff is not None:
+        PROB_CUTOFF = max(0.0, min(1.0, float(prob_cutoff)))
+    if beam_k is not None and beam_k >= 1:
+        BEAM_K = int(beam_k)
+
+# ────────────────────────────────────────────────────────────────────────────
 DIRECTIONS = ["up", "down", "left", "right"]
 
-def best_move(board: Board, depth: int, time_limit_ms: int, eval_fn: Optional[Callable] = None) -> str:
-    """
-    Fonction principale : retourne le meilleur coup à jouer sur une grille donnée
-    en utilisant l'algorithme Expectimax avec approfondissement itératif.
+def best_move(board: Board,
+              depth: int,
+              time_limit_ms: int,
+              eval_fn: Optional[Callable[[Board], float]] = None
+              ) -> str:
+    """Choisit la meilleure direction avec BEPP + approfondissement itératif."""
+    eval_fn  = eval_fn or bounded_eval
+    deadline = time.time() + time_limit_ms / 1000.0
+    tt: Dict[int, Tuple[int, float]] = {}
 
-    - board : état courant du jeu (classe Board)
-    - depth : profondeur maximale d'exploration (sera augmenté progressivement)
-    - time_limit_ms : temps alloué pour prendre une décision (en millisecondes)
-    - eval_fn : fonction d’évaluation optionnelle (Victor ou heuristique simple)
-    """
-    start_time = time.time()
-    time_limit = start_time + (time_limit_ms / 1000.0)
-    eval_fn = eval_fn or basic_eval
-    transpo_table = {}  # Table de transposition pour éviter les re-calculs
+    best_dir, best_val = None, float("-inf")
 
-    best = None
-    best_score = float('-inf')
-    max_depth = 1
+    for d in range(1, depth + 1):
+        if time.time() >= deadline:
+            break
 
-    # Approfondissement itératif : on tente des profondeurs croissantes jusqu'à épuiser le temps
-    while time.time() < time_limit and max_depth <= depth:
-        for direction in DIRECTIONS:
-            temp = board.clone()
-            if not temp.move(direction)[0]:  # ignore les coups illégaux
+        # ---- BEAM tri rapide ---------------------------------------------
+        moves: List[Tuple[float, str, Board]] = []
+        for dir_ in DIRECTIONS:
+            tmp = board.clone()
+            if not tmp.move(dir_, add_random=False)[0]:
                 continue
+            moves.append((eval_fn(tmp), dir_, tmp))
+        moves.sort(reverse=True, key=lambda t: t[0])
+        moves = moves[:BEAM_K]
 
-            score = expectimax(temp, depth=max_depth - 1, maximizing=False,
-                               eval_fn=eval_fn, transpo_table=transpo_table,
-                               time_limit=time_limit)
+        for _, dir_, child in moves:
+            val = _expectimax(child, d - 1, False,
+                              -float("inf"), float("inf"),
+                              eval_fn, tt, deadline)
+            if val > best_val:
+                best_val, best_dir = val, dir_
 
-            if score > best_score:
-                best_score = score
-                best = direction
+        if time.time() >= deadline:
+            break
 
-        max_depth += 1
+    return best_dir or "up"
 
-    return best or "up"  # fallback si rien trouvé
+# ───────────────────────────────── algorithme récursif ──────────────────────
+def _expectimax(board: Board,
+                depth: int,
+                maximizing: bool,
+                alpha: float,
+                beta: float,
+                eval_fn: Callable[[Board], float],
+                tt: Dict[int, Tuple[int, float]],
+                deadline: float) -> float:
 
-
-def expectimax(board: Board, depth: int, maximizing: bool, eval_fn: Callable,
-               transpo_table: dict, time_limit: float) -> float:
-    """
-    Fonction récursive de l’algorithme Expectimax :
-    - Noeud joueur : max des valeurs des coups possibles
-    - Noeud chance : somme pondérée des possibilités d’apparition (2 ou 4)
-    """
-    if time.time() > time_limit:
+    if time.time() >= deadline:
         return eval_fn(board)
 
     key = hash(board)
-    if key in transpo_table:
-        saved_depth, value = transpo_table[key]
-        if saved_depth >= depth:
-            return value
+    if key in tt:
+        saved_d, val = tt[key]
+        if saved_d >= depth:
+            return val
 
+    # feuille ?
     if depth == 0 or not board.can_move():
         val = eval_fn(board)
-        transpo_table[key] = (depth, val)
+        tt[key] = (depth, val)
         return val
 
+    # ─────────── Max ───────────
     if maximizing:
-        # Le joueur choisit le meilleur coup
-        max_val = float('-inf')
-        for direction in DIRECTIONS:
-            temp = board.clone()
-            if not temp.move(direction)[0]:
+        best = float("-inf")
+        for dir_ in DIRECTIONS:
+            tmp = board.clone()
+            if not tmp.move(dir_, add_random=False)[0]:
                 continue
-            val = expectimax(temp, depth - 1, False, eval_fn, transpo_table, time_limit)
-            max_val = max(max_val, val)
-        transpo_table[key] = (depth, max_val)
-        return max_val
+            val = _expectimax(tmp, depth - 1, False,
+                              alpha, beta,
+                              eval_fn, tt, deadline)
+            best = max(best, val)
+            alpha = max(alpha, val)
+            if beta <= alpha:
+                break
+        tt[key] = (depth, best)
+        return best
 
-    else:
-        # Noeud chance : le jeu insère une tuile 2 (90%) ou 4 (10%) dans une case vide
-        cells = board.get_empty_cells()
-        if not cells:
-            return eval_fn(board)
+    # ─────────── Chance ─────────
+    running, p_seen = 0.0, 0.0
+    empties = board.get_empty_cells()
 
-        total = 0
-        count = 0
-        sampled = random.sample(cells, min(4, len(cells)))  # on limite à 4 échantillons pour rester rapide
+    for (r, c) in empties:         # ordre séquentiel - reproductible
+        for exp, prob in ((1, 0.9), (2, 0.1)):  # 2 avant 4
+            if prob < PROB_CUTOFF:
+                running += prob * eval_fn(board)
+                p_seen  += prob
+                continue
 
-        for x, y in sampled:
-            for value, prob in [(2, 0.9), (4, 0.1)]:
-                if prob < 0.05:
-                    continue
-                temp = board.clone()
-                temp.set_tile(x, y, value)
-                val = expectimax(temp, depth - 1, True, eval_fn, transpo_table, time_limit)
-                total += prob * val
-            count += 1
+            tmp = board.clone()
+            tmp.set_tile(r, c, exp)
+            val = _expectimax(tmp, depth - 1, True,
+                              alpha, beta,
+                              eval_fn, tt, deadline)
+            running += prob * val
+            p_seen  += prob
 
-        expected = total / count if count > 0 else 0
-        transpo_table[key] = (depth, expected)
-        return expected
+            upper = running + (1 - p_seen) * V_MAX
+            if upper < alpha:
+                break   # on ne battra jamais α
+        if upper < alpha:
+            break
+
+    expected = running / p_seen if p_seen else eval_fn(board)
+    tt[key] = (depth, expected)
+    return expected
