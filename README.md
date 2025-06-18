@@ -8,7 +8,7 @@
 
 ```bash
 # dépendances minimales
-pip install -r requirements.txt         # numpy / pandas / pyarrow / scikit‑learn / pygame (fac.)
+pip install numpy  pandas  pyarrow  scikit‑learn pygame (fac.)
 
 # (option) accélération JIT
 pip install numba
